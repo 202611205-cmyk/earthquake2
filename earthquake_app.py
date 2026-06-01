@@ -1,104 +1,96 @@
 import streamlit as st
-import folium
-from streamlit_folium import st_folium
-import random
-import math
+import matplotlib
+matplotlib.rcParams['font.family'] = 'DejaVu Sans'
+import matplotlib.pyplot as plt
+import numpy as np
 
-st.set_page_config(page_title="세계 지진 위험도 분석 시스템", layout="centered")
+st.set_page_config(page_title="폐암 환자 군집 분석 시스템", layout="centered")
 
 st.markdown("""
 <style>
     .main > div { padding-top: 2rem; }
-    .risk-high { font-size: 1.4rem; font-weight: 700; color: #c53030; margin: 1rem 0; }
-    .risk-mid  { font-size: 1.4rem; font-weight: 700; color: #c05621; margin: 1rem 0; }
-    .risk-low  { font-size: 1.4rem; font-weight: 700; color: #276749; margin: 1rem 0; }
+    .result-box {
+        background-color: #f0fff4;
+        border: 1px solid #9ae6b4;
+        border-radius: 8px;
+        padding: 14px 18px;
+        color: #276749;
+        font-size: 1rem;
+        font-weight: 500;
+        margin-bottom: 0.5rem;
+    }
 </style>
 """, unsafe_allow_html=True)
 
-st.title("세계 지진 위험도 분석 시스템")
-st.caption("위도와 경도를 입력하면 주변 지진 데이터를 기반으로 위험도를 분석합니다.")
+st.markdown("## 🫁 폐암 환자 군집 분석 시스템")
+st.markdown("AI가 환자의 특성을 분석하여  \n어떤 군집(유형)에 속하는지 예측합니다.")
+st.markdown("---")
+st.markdown("### 📋 환자 정보 입력")
 
-st.caption("위도 입력")
-lat = st.number_input("위도", min_value=-90.0, max_value=90.0, value=37.50, step=0.5, label_visibility="collapsed")
+col1, col2, col3 = st.columns(3)
+with col1:
+    st.caption("나이")
+    age = st.number_input("나이", min_value=0.0, max_value=120.0, value=50.0, step=0.5, label_visibility="collapsed")
+with col2:
+    st.caption("흡연량")
+    smoking = st.number_input("흡연량", min_value=0.0, max_value=100.0, value=10.0, step=0.5, label_visibility="collapsed")
+with col3:
+    st.caption("음주량")
+    drinking = st.number_input("음주량", min_value=0.0, max_value=100.0, value=5.0, step=0.5, label_visibility="collapsed")
 
-st.caption("경도 입력")
-lon = st.number_input("경도", min_value=-180.0, max_value=180.0, value=127.00, step=0.5, label_visibility="collapsed")
+st.markdown("---")
 
-# 지진 다발 지역 데이터 (위도, 경도, 규모)
-EARTHQUAKE_ZONES = [
-    # 환태평양 불의 고리
-    (35.6, 139.7, 6.5), (37.5, 141.0, 7.2), (33.0, 131.0, 5.8),
-    (40.0, 143.0, 6.8), (28.0, 130.0, 5.5), (45.0, 150.0, 6.2),
-    (50.0, 156.0, 5.9), (55.0, 160.0, 6.1), (60.0, 165.0, 5.7),
-    (19.4, -155.3, 6.0), (21.0, -157.0, 5.5), (61.0, -150.0, 6.3),
-    (58.0, -152.0, 5.8), (52.0, -175.0, 6.5), (48.0, -122.0, 5.2),
-    (37.7, -122.4, 6.0), (34.0, -118.0, 5.8), (19.0, -99.0, 5.5),
-    (13.0, -89.0, 6.2), (-12.0, -77.0, 5.9), (-33.0, -70.0, 6.1),
-    (-18.0, -70.0, 5.7), (-41.0, 174.0, 5.5), (-43.0, 172.0, 6.0),
-    (-8.0, 115.0, 5.8), (1.0, 124.0, 6.3), (14.0, 121.0, 5.6),
-    (-6.0, 105.0, 6.5), (-8.0, 120.0, 5.9), (4.0, 96.0, 7.5),
-    # 알프스-히말라야 지진대
-    (28.0, 84.0, 6.8), (36.0, 70.0, 6.2), (38.0, 43.0, 5.8),
-    (39.0, 35.0, 5.5), (38.0, 22.0, 6.0), (37.0, 15.0, 5.7),
-    (43.0, 13.0, 5.3), (41.0, 29.0, 5.9), (40.0, 50.0, 6.1),
-    (35.0, 60.0, 5.8), (30.0, 57.0, 6.3), (29.0, 52.0, 5.6),
-    # 기타
-    (-4.0, 15.0, 5.2), (0.0, 30.0, 5.5), (38.0, 15.0, 5.4),
-    (-20.0, -175.0, 6.7), (-15.0, 167.0, 6.4), (17.0, -62.0, 5.1),
-    (18.5, -72.0, 5.8), (10.0, -84.0, 5.3),
-    # 추가 랜덤 분포
-    (46.0, 13.0, 4.8), (47.0, 18.0, 4.5), (36.5, 25.0, 5.2),
-    (32.0, 35.0, 4.9), (24.0, 121.0, 5.7), (23.0, 120.0, 6.0),
-    (-37.0, -72.0, 5.5), (-25.0, -65.0, 5.0), (6.0, -77.0, 5.3),
-    (10.0, 125.0, 5.6), (8.0, 126.0, 6.1), (16.0, 120.0, 5.4),
-]
+if st.button("🔍 군집 분석하기", use_container_width=True):
 
-def get_risk(lat, lon):
-    min_dist = float('inf')
-    for eq_lat, eq_lon, mag in EARTHQUAKE_ZONES:
-        dist = math.sqrt((lat - eq_lat)**2 + (lon - eq_lon)**2)
-        weighted = dist / (mag / 5.0)
-        if weighted < min_dist:
-            min_dist = weighted
-    if min_dist < 5:
-        return "높음"
-    elif min_dist < 12:
-        return "중간"
+    # 군집 분류: 0 매우건강, 1 위험, 2 건강
+    risk = smoking * 0.5 + drinking * 0.3 + max(0, age - 40) * 0.2
+    if risk >= 20:
+        cluster = 1
+    elif risk >= 8:
+        cluster = 2
     else:
-        return "낮음"
+        cluster = 0
 
-def get_color(mag):
-    if mag >= 6.5:
-        return 'red'
-    elif mag >= 5.5:
-        return 'green'
-    else:
-        return 'blue'
+    st.markdown(f'<div class="result-box">이 환자는 {cluster}번 군집에 속합니다.</div>', unsafe_allow_html=True)
+    st.markdown("0번은 매우 건강군, 1번은 위험군, 2번은 건강군입니다.")
 
-if st.button("위험도 분석"):
-    risk = get_risk(lat, lon)
+    # 샘플 데이터 생성 (흡연량, 음주량 기반)
+    np.random.seed(42)
 
-    css_class = {"높음": "risk-high", "중간": "risk-mid", "낮음": "risk-low"}[risk]
-    st.markdown(f'<div class="{css_class}">예상 위험도: {risk}</div>', unsafe_allow_html=True)
+    # 군집 0: 매우 건강 - 흡연/음주 낮음
+    c0_x = np.random.uniform(0, 10, 15)
+    c0_y = np.random.uniform(0, 3, 15)
 
-    m = folium.Map(location=[lat, lon], zoom_start=4, tiles="CartoDB positron")
+    # 군집 1: 위험 - 흡연/음주 높음
+    c1_x = np.random.uniform(20, 35, 15)
+    c1_y = np.random.uniform(5, 9, 15)
 
-    for eq_lat, eq_lon, mag in EARTHQUAKE_ZONES:
-        folium.CircleMarker(
-            location=[eq_lat, eq_lon],
-            radius=6,
-            color=get_color(mag),
-            fill=True,
-            fill_opacity=0.8,
-            popup=f"규모: {mag}",
-        ).add_to(m)
+    # 군집 2: 건강 - 흡연/음주 중간
+    c2_x = np.random.uniform(10, 25, 15)
+    c2_y = np.random.uniform(2, 6, 15)
 
-    folium.Marker(
-        location=[lat, lon],
-        icon=folium.Icon(color='black', icon='star', prefix='fa'),
-        popup="입력 위치"
-    ).add_to(m)
+    fig, ax = plt.subplots(figsize=(7, 5))
+    fig.patch.set_facecolor('white')
+    ax.set_facecolor('white')
 
-    st_folium(m, width=680, height=400)
+    color_map = {0: '#f9c74f', 1: '#3d405b', 2: '#2a9d8f'}
+    label_map = {0: '매우 건강군(0)', 1: '위험군(1)', 2: '건강군(2)'}
 
-    st.caption("🔴 규모 6.5 이상  🟢 규모 5.5~6.4  🔵 규모 5.5 미만  ★ 입력 위치")
+    ax.scatter(c0_x, c0_y, color=color_map[0], s=70, label=label_map[0], zorder=3)
+    ax.scatter(c1_x, c1_y, color=color_map[1], s=70, label=label_map[1], zorder=3)
+    ax.scatter(c2_x, c2_y, color=color_map[2], s=70, label=label_map[2], zorder=3)
+
+    # 현재 환자
+    ax.scatter(smoking, drinking, color=color_map[cluster], marker='*', s=400,
+               edgecolors='#333', linewidths=0.8, zorder=5, label='현재 환자')
+
+    ax.set_title('군집 시각화', fontsize=13, pad=10)
+    ax.set_xlabel('흡연량', fontsize=10)
+    ax.set_ylabel('음주량', fontsize=10)
+    ax.legend(loc='upper left', fontsize=9)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.tick_params(labelsize=9)
+
+    st.pyplot(fig)
+    plt.close()
